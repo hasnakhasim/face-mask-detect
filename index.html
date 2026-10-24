@@ -1,0 +1,285 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Face Mask Reconstruction System</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<header>
+    <h1>Face Mask Reconstruction System</h1>
+    <p>AI-powered estimation of an uncovered face</p>
+</header>
+
+<div class="container">
+    <main>
+
+        <h2>Upload Your Photo</h2>
+
+        <p>
+            Upload a photograph of a person wearing a face mask.
+            Paint over the mask area to generate an AI estimate
+            of the uncovered face.
+        </p>
+
+        {% if error_message %}
+            <p class="error">{{ error_message }}</p>
+        {% endif %}
+
+        <form method="POST"
+              action="/"
+              enctype="multipart/form-data"
+              id="uploadForm">
+
+            <label for="image">Choose a photo:</label>
+
+            <input type="file"
+                   id="image"
+                   name="image"
+                   accept="image/*"
+                   required>
+
+            <div id="editor" style="display: none;">
+                <h2>Mark the Face Mask Area</h2>
+
+                <p>
+                    Paint over the entire mask and any straps you
+                    want removed. White paint indicates the area
+                    to regenerate.
+                </p>
+
+                <label for="brushSize">Brush size:</label>
+                <input type="range"
+                       id="brushSize"
+                       min="5"
+                       max="80"
+                       value="30">
+
+                <button type="button" id="clearButton">
+                    Clear Markings
+                </button>
+
+                <div class="preview-container" id="previewContainer">
+                    <img id="previewImage"
+                         src=""
+                         alt="Uploaded photo preview">
+
+                    <canvas id="maskCanvas"></canvas>
+                </div>
+
+                <input type="hidden"
+                       name="mask_data"
+                       id="mask_data">
+
+                <p>
+                    Make sure the white markings cover the whole
+                    mask before generating.
+                </p>
+
+                <button type="submit" id="generateButton">
+                    Generate Estimated Face
+                </button>
+            </div>
+
+        </form>
+
+        {% if original_image and generated_image %}
+        <section class="images">
+            <div class="image-card">
+                <h2>Original Photo</h2>
+                <img
+                    src="{{ url_for('static', filename=original_image) }}"
+                    alt="Original masked photograph">
+            </div>
+
+            <div class="image-card">
+                <h2>AI-Generated Estimate</h2>
+                <img
+                    src="{{ url_for('static', filename=generated_image) }}"
+                    alt="AI-generated estimate of the uncovered face">
+            </div>
+        </section>
+
+        <p style="margin-top: 20px;">
+            The generated facial features are an AI estimate,
+            not a verified reconstruction of the person's actual face.
+        </p>
+        {% endif %}
+
+    </main>
+</div>
+
+<footer>
+    <p>Face Mask Reconstruction System | Flask and AI Inpainting</p>
+</footer>
+
+<script>
+    const fileInput = document.getElementById("image");
+    const editor = document.getElementById("editor");
+    const previewImage = document.getElementById("previewImage");
+    const canvas = document.getElementById("maskCanvas");
+    const context = canvas.getContext("2d");
+    const brushSize = document.getElementById("brushSize");
+    const clearButton = document.getElementById("clearButton");
+    const uploadForm = document.getElementById("uploadForm");
+    const maskInput = document.getElementById("mask_data");
+    const generateButton = document.getElementById("generateButton");
+
+    let drawing = false;
+    let imageReady = false;
+    let currentObjectURL = null;
+
+    // Prepare the image and canvas.
+    fileInput.addEventListener("change", function () {
+        const file = this.files[0];
+
+        if (!file) {
+            editor.style.display = "none";
+            imageReady = false;
+            return;
+        }
+
+        if (!file.type.startsWith("image/")) {
+            alert("Please select a valid image file.");
+            this.value = "";
+            editor.style.display = "none";
+            imageReady = false;
+            return;
+        }
+
+        if (currentObjectURL) {
+            URL.revokeObjectURL(currentObjectURL);
+        }
+
+        currentObjectURL = URL.createObjectURL(file);
+        imageReady = false;
+        editor.style.display = "block";
+        previewImage.src = currentObjectURL;
+    });
+
+    previewImage.addEventListener("load", function () {
+        canvas.width = previewImage.naturalWidth;
+        canvas.height = previewImage.naturalHeight;
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        imageReady = true;
+    });
+
+    // Get pointer position in the original image coordinates.
+    function getPosition(event) {
+        const rect = canvas.getBoundingClientRect();
+
+        return {
+            x: (event.clientX - rect.left) *
+               (canvas.width / rect.width),
+
+            y: (event.clientY - rect.top) *
+               (canvas.height / rect.height)
+        };
+    }
+
+    function startDrawing(event) {
+        if (!imageReady) return;
+
+        event.preventDefault();
+        drawing = true;
+        canvas.setPointerCapture(event.pointerId);
+
+        const pos = getPosition(event);
+
+        context.beginPath();
+        context.arc(
+            pos.x,
+            pos.y,
+            Number(brushSize.value) / 2,
+            0,
+            Math.PI * 2
+        );
+
+        context.fillStyle = "rgba(255,255,255,1)";
+        context.fill();
+    }
+
+    function draw(event) {
+        if (!drawing || !imageReady) return;
+
+        event.preventDefault();
+
+        const pos = getPosition(event);
+
+        context.lineWidth = Number(brushSize.value);
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.strokeStyle = "rgba(255,255,255,1)";
+
+        context.lineTo(pos.x, pos.y);
+        context.stroke();
+        context.beginPath();
+        context.moveTo(pos.x, pos.y);
+    }
+
+    function stopDrawing() {
+        drawing = false;
+        context.beginPath();
+    }
+
+    canvas.addEventListener("pointerdown", startDrawing);
+    canvas.addEventListener("pointermove", draw);
+    canvas.addEventListener("pointerup", stopDrawing);
+    canvas.addEventListener("pointercancel", stopDrawing);
+    canvas.addEventListener("lostpointercapture", stopDrawing);
+
+    // Clear the selected region.
+    clearButton.addEventListener("click", function () {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+    });
+
+    // Send the transparent canvas to Flask.
+    uploadForm.addEventListener("submit", function (event) {
+        if (!fileInput.files.length) {
+            alert("Please upload a photo first.");
+            event.preventDefault();
+            return;
+        }
+
+        if (!imageReady) {
+            alert("Please wait until the image preview loads.");
+            event.preventDefault();
+            return;
+        }
+
+        const pixels = context.getImageData(
+            0, 0, canvas.width, canvas.height
+        ).data;
+
+        let painted = false;
+
+        for (let i = 3; i < pixels.length; i += 4) {
+            if (pixels[i] > 10) {
+                painted = true;
+                break;
+            }
+        }
+
+        if (!painted) {
+            alert("Paint over the entire face mask before generating.");
+            event.preventDefault();
+            return;
+        }
+
+        maskInput.value = canvas.toDataURL("image/png");
+
+        generateButton.disabled = true;
+        generateButton.textContent = "Generating... Please wait";
+    });
+</script>
+
+</body>
+</html>
